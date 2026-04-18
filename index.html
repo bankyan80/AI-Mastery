@@ -6,9 +6,17 @@
 <title>AI Mastery: Belajar Kecerdasan Buatan</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script>if(typeof firebase==='undefined'){document.write('<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.0/firebase-app-compat.js"><\/script>')}</script>
+<script>
+if(typeof firebase==='undefined'){
+  document.write('<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.0/firebase-app-compat.js"><\/script>');
+}
+</script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-<script>if(typeof firebase==='undefined'||typeof firebase.auth==='undefined'){document.write('<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.0/firebase-auth-compat.js"><\/script>')}</script>
+<script>
+if(typeof firebase==='undefined'||typeof firebase.auth==='undefined'){
+  document.write('<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.0/firebase-auth-compat.js"><\/script>');
+}
+</script>
 <style>
 :root{
   --bg:#0a0a1a;--card:rgba(255,255,255,0.04);--card2:rgba(255,255,255,0.07);
@@ -692,19 +700,28 @@ let auth=null;
 let currentUser=null;
 let uidKey='guest';
 
-try{
-  if(typeof firebase!=='undefined'&&firebase.apps&&firebase.apps.length===0){
-    const fbConfig={apiKey:"AIzaSyBAAqRc86lTdgeNcyi8y38iPM_kQ2MlV8I",authDomain:"smart-ai-afc4a.firebaseapp.com",databaseURL:"https://smart-ai-afc4a-default-rtdb.asia-southeast1.firebasedatabase.app",projectId:"smart-ai-afc4a",storageBucket:"smart-ai-afc4a.firebasestorage.app",messagingSenderId:"201179853408",appId:"1:201179853408:web:797cdad499be51d9198905",measurementId:"G-WMDRVRNCKN"};
-    firebase.initializeApp(fbConfig);
+function initFirebase(){
+  try{
+    if(typeof firebase==='undefined'||!firebase.apps){return false}
+    if(firebase.apps.length===0){
+      const fbConfig={apiKey:"AIzaSyBAAqRc86lTdgeNcyi8y38iPM_kQ2MlV8I",authDomain:"smart-ai-afc4a.firebaseapp.com",databaseURL:"https://smart-ai-afc4a-default-rtdb.asia-southeast1.firebasedatabase.app",projectId:"smart-ai-afc4a",storageBucket:"smart-ai-afc4a.firebasestorage.app",messagingSenderId:"201179853408",appId:"1:201179853408:web:797cdad499be51d9198905",measurementId:"G-WMDRVRNCKN"};
+      firebase.initializeApp(fbConfig);
+    }
     auth=firebase.auth();
     firebaseReady=true;
-  }else if(typeof firebase!=='undefined'&&firebase.apps&&firebase.apps.length>0){
-    auth=firebase.auth();
-    firebaseReady=true;
+    return true;
+  }catch(e){
+    console.warn('Firebase init error:',e);
+    firebaseReady=false;
+    return false;
   }
-}catch(e){
-  console.warn('Firebase init error:',e);
-  firebaseReady=false;
+}
+initFirebase();
+if(!firebaseReady){
+  var fbCheck=setInterval(function(){
+    if(initFirebase()){clearInterval(fbCheck);updateFirebaseStatus();setupAuthListener()}
+  },500);
+  setTimeout(function(){clearInterval(fbCheck);updateFirebaseStatus()},10000);
 }
 
 function uid(){return currentUser?currentUser.uid:'guest'}
@@ -713,44 +730,63 @@ function lsKey(k){return uid()+'_'+k}
 // === AUTH ===
 function isMobile(){return/Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)}
 
-function googleLogin(){
-  if(!firebaseReady){
-    document.getElementById('auth-err').textContent='Firebase tidak tersedia. Pastikan koneksi internet aktif dan buka ulang halaman.';
-    return;
-  }
-  document.getElementById('auth-form').style.display='none';
-  document.getElementById('auth-loading').style.display='flex';
-  document.getElementById('auth-err').textContent='';
-  var provider=new firebase.auth.GoogleAuthProvider();
-  provider.addScope('email');
-  provider.addScope('profile');
+function showAuthErr(msg,color){
+  var el=document.getElementById('auth-err');
+  if(el){el.style.color=color||'#ef4444';el.textContent=msg}
+  document.getElementById('auth-form').style.display='block';
+  document.getElementById('auth-loading').style.display='none';
+}
 
-  if(isMobile()){
-    auth.signInWithRedirect(provider).catch(function(err){
-      document.getElementById('auth-form').style.display='block';
-      document.getElementById('auth-loading').style.display='none';
-      if(err.code==='auth/unauthorized-domain'){
-        document.getElementById('auth-err').textContent='Domain belum terdaftar di Firebase. Tambahkan domain ini di Firebase Console > Authentication > Settings > Authorized domains.';
-      }else{
-        document.getElementById('auth-err').textContent='Gagal login: '+err.message;
-      }
-    });
-  }else{
-    auth.signInWithPopup(provider).then(function(result){
-      onAuthSuccess(result.user);
-    }).catch(function(err){
-      document.getElementById('auth-form').style.display='block';
-      document.getElementById('auth-loading').style.display='none';
-      if(err.code==='auth/popup-closed-by-user'||err.code==='auth/cancelled-popup-request'){
-        document.getElementById('auth-err').textContent='Login dibatalkan.';
-      }else if(err.code==='auth/unauthorized-domain'){
-        document.getElementById('auth-err').textContent='Domain belum terdaftar di Firebase. Tambahkan domain ini di Firebase Console > Authentication > Settings > Authorized domains.';
-      }else{
-        document.getElementById('auth-err').textContent='Gagal login: '+err.message;
-      }
-    });
+function googleLogin(){
+  try{
+    console.log('[AI Mastery] googleLogin called, firebaseReady:',firebaseReady);
+    if(!firebaseReady){
+      showAuthErr('Firebase belum siap. Tunggu sebentar atau refresh halaman.','#f59e0b');
+      return;
+    }
+    if(!auth){
+      showAuthErr('Auth service tidak tersedia. Refresh halaman.');
+      return;
+    }
+    document.getElementById('auth-form').style.display='none';
+    document.getElementById('auth-loading').style.display='flex';
+    document.getElementById('auth-err').textContent='';
+    var provider=new firebase.auth.GoogleAuthProvider();
+    provider.addScope('email');
+    provider.addScope('profile');
+
+    if(isMobile()){
+      console.log('[AI Mastery] Using signInWithRedirect (mobile)');
+      auth.signInWithRedirect(provider).catch(function(err){
+        console.warn('[AI Mastery] Redirect error:',err.code,err.message);
+        showAuthErr(
+          err.code==='auth/unauthorized-domain'
+            ?'Domain belum terdaftar di Firebase Console > Authentication > Settings > Authorized domains.'
+            :'Gagal login: '+err.message
+        );
+      });
+    }else{
+      console.log('[AI Mastery] Using signInWithPopup (desktop)');
+      auth.signInWithPopup(provider).then(function(result){
+        console.log('[AI Mastery] Login success:',result.user.displayName);
+        onAuthSuccess(result.user);
+      }).catch(function(err){
+        console.warn('[AI Mastery] Popup error:',err.code,err.message);
+        if(err.code==='auth/popup-closed-by-user'||err.code==='auth/cancelled-popup-request'){
+          showAuthErr('Login dibatalkan.','#8b92a8');
+        }else if(err.code==='auth/unauthorized-domain'){
+          showAuthErr('Domain belum terdaftar. Tambahkan bankyan80.github.io di Firebase Console > Authentication > Settings > Authorized domains.');
+        }else{
+          showAuthErr('Gagal login: '+err.message);
+        }
+      });
+    }
+  }catch(e){
+    console.error('[AI Mastery] googleLogin error:',e);
+    showAuthErr('Terjadi kesalahan: '+e.message);
   }
 }
+window.googleLogin=googleLogin;
 
 function onAuthSuccess(user){
   currentUser=user;uidKey=user.uid;
@@ -831,33 +867,41 @@ function resetProgress(){
 }
 
 // === AUTH STATE LISTENER ===
-if(firebaseReady&&auth){
+function setupAuthListener(){
+  if(!firebaseReady||!auth)return;
   auth.onAuthStateChanged(function(user){
     if(user){
+      console.log('[AI Mastery] Auto-login:',user.displayName);
       currentUser=user;uidKey=user.uid;
       hideAuth();loadUserData();init();updateUserBar();saveUserData();
     }
   });
-  // Handle redirect result from mobile login
-  if(isMobile()){
-    auth.getRedirectResult().catch(function(err){
-      if(err.code!=='auth/popup-closed-by-user'&&err.code!=='auth/cancelled-popup-request'){
-        console.warn('Redirect result:',err);
-      }
-    });
-  }
+  auth.getRedirectResult().then(function(result){
+    if(result.user){
+      console.log('[AI Mastery] Redirect login success:',result.user.displayName);
+      onAuthSuccess(result.user);
+    }
+  }).catch(function(err){
+    if(err.code!=='auth/popup-closed-by-user'&&err.code!=='auth/cancelled-popup-request'&&err.code!=='auth/redirect-cancelled-by-user'){
+      console.warn('[AI Mastery] Redirect result error:',err);
+    }
+  });
 }
+setupAuthListener();
 
 // Show Firebase status on login page
-window.addEventListener('load',function(){
-  if(!firebaseReady){
-    var errEl=document.getElementById('auth-err');
-    if(errEl){
-      errEl.style.color='#f59e0b';
-      errEl.textContent='Memuat Firebase... Jika ini muncul terus, pastikan koneksi internet aktif lalu refresh halaman.';
-    }
+function updateFirebaseStatus(){
+  var errEl=document.getElementById('auth-err');
+  if(!errEl)return;
+  if(firebaseReady){
+    errEl.textContent='';
+    errEl.style.color='#ef4444';
+  }else{
+    errEl.style.color='#f59e0b';
+    errEl.textContent='Firebase gagal dimuat. Pastikan koneksi internet aktif lalu refresh halaman.';
   }
-});
+}
+window.addEventListener('load',function(){updateFirebaseStatus()});
 
 // === STATE ===
 const ST={cur:'sec1',vis:{},bq:0,qi:0,qs:0,qd:false,genres:new Set()};

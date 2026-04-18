@@ -707,6 +707,36 @@ var uidKey='guest';
 function uid(){return currentUser?currentUser.uid:'guest'}
 function lsKey(k){return uid()+'_'+k}
 
+// === USER DATA (localStorage) ===
+function saveUserData(){
+  try{
+    var data={vis:ST.vis||{},bq:ST.bq||0};
+    localStorage.setItem(lsKey('aim_data'),JSON.stringify(data));
+  }catch(e){}
+}
+function loadUserData(){
+  try{
+    var raw=localStorage.getItem(lsKey('aim_data'));
+    if(!raw) return;
+    var data=JSON.parse(raw);
+    if(data.vis){Object.keys(data.vis).forEach(function(k){ST.vis[k]=true});}
+    if(data.bq) ST.bq=data.bq;
+  }catch(e){}
+}
+function resetProgress(){
+  try{localStorage.removeItem(lsKey('aim_data'))}catch(e){}
+  ST.vis={};ST.bq=0;ST.qi=0;ST.qs=0;ST.qd=false;
+  upProg();
+  // Reset UI
+  document.querySelectorAll('.sec').forEach(function(s){s.classList.remove('on')});
+  document.getElementById('sec1').classList.add('on');
+  document.querySelectorAll('.bnav-i').forEach(function(n){n.classList.toggle('on',n.dataset.s==='sec1')});
+  document.getElementById('tt').textContent=SN.sec1;
+  window.scrollTo({top:0,behavior:'smooth'});
+  var dd=document.getElementById('user-dd');if(dd) dd.classList.remove('show');
+  alert('Progress berhasil direset!');
+}
+
 // === AUTH UI ===
 function showAuthErr(msg,color){
   var el=document.getElementById('auth-err');
@@ -774,7 +804,7 @@ window.updateUserBar = updateUserBar;
 <script type="module">
 // === FIREBASE MODULAR SDK v12.12.0 ===
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-app.js";
-import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, GoogleAuthProvider, browserLocalPersistence, setPersistence } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-auth.js";
+import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, GoogleAuthProvider, browserLocalPersistence, browserSessionPersistence, setPersistence } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCvTgYoZbT0NgVT7i9rF9z1mhvj8koSXQc",
@@ -787,66 +817,77 @@ const firebaseConfig = {
 };
 
 let auth;
-var _persistenceReady = false;
 try {
   const app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   window._fbLoaded = true;
-  console.log('[AI Mastery] Firebase v12.12.0 READY (modular)');
+  console.log('[AI Mastery] Firebase v12.12.0 READY');
 } catch(e) {
   console.error('[AI Mastery] Firebase init error:', e);
 }
 
-// === LOGIN FUNCTION ===
+// === MOBILE DETECTION ===
+function _isMobile(){
+  var ua = navigator.userAgent || navigator.vendor || window.opera;
+  var check = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(ua.toLowerCase());
+  var touchMobile = (navigator.maxTouchPoints > 1) && (window.innerWidth <= 1024);
+  console.log('[AI Mastery] Device check: UA=' + ua.substring(0,30) + ' touch=' + navigator.maxTouchPoints + ' w=' + window.innerWidth + ' mobile=' + (check || touchMobile));
+  return check || touchMobile;
+}
+var _mobileDetected = _isMobile();
+
+// === LOGIN: Desktop=popup, Mobile=redirect (direct, no popup attempt) ===
 function googleLogin(){
-  try {
-    console.log('[AI Mastery] googleLogin clicked! auth='+(!!auth));
-    if (!auth) { showAuthErr('Firebase belum siap. Tunggu sebentar...','#f59e0b'); return; }
-    document.getElementById('auth-form').style.display='none';
-    document.getElementById('auth-loading').style.display='flex';
-    document.getElementById('auth-err').textContent='';
-    var provider = new GoogleAuthProvider();
-    provider.addScope('email');
-    provider.addScope('profile');
-    var isMob = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window) || window.innerWidth < 768;
-    console.log('[AI Mastery] Mobile?', isMob, 'UA:', navigator.userAgent);
-    if (isMob) {
-      console.log('[AI Mastery] Using redirect login...');
-      signInWithRedirect(auth, provider).catch(function(err) {
-        console.error('[AI Mastery] Redirect error:', err);
+  if (!auth) { showAuthErr('Firebase belum siap. Tunggu sebentar...','#f59e0b'); return; }
+  document.getElementById('auth-form').style.display='none';
+  document.getElementById('auth-loading').style.display='flex';
+  document.getElementById('auth-err').textContent='';
+
+  var provider = new GoogleAuthProvider();
+  provider.addScope('email');
+  provider.addScope('profile');
+  provider.setCustomParameters({ prompt: 'select_account' });
+
+  if(_mobileDetected){
+    // MOBILE: Skip popup entirely, use redirect directly to avoid race conditions
+    console.log('[AI Mastery] MOBILE → using signInWithRedirect (skipping popup)');
+    signInWithRedirect(auth, provider).catch(function(err){
+      console.error('[AI Mastery] Mobile redirect failed:', err.code, err.message);
+      document.getElementById('auth-form').style.display='block';
+      document.getElementById('auth-loading').style.display='none';
+      if(err.code === 'auth/unauthorized-domain'){
+        showAuthErr('Domain belum terdaftar di Firebase. Tambahkan di: Firebase → Auth → Settings → Authorized domains','#ef4444');
+      } else if(err.code === 'auth/redirect-cancelled-by-user'){
+        showAuthErr('Login dibatalkan.','#8b92a8');
+      } else {
+        showAuthErr('Gagal login: ' + (err.code||'') + '. Coba lagi atau gunakan browser lain.');
+      }
+    });
+  } else {
+    // DESKTOP: Try popup first, fallback to redirect
+    console.log('[AI Mastery] DESKTOP → trying signInWithPopup first...');
+    signInWithPopup(auth, provider).then(function(result){
+      console.log('[AI Mastery] Popup login OK:', result.user.displayName);
+      onAuthSuccess(result.user);
+    }).catch(function(err){
+      console.log('[AI Mastery] Popup failed (' + (err.code||'unknown') + '), trying redirect...');
+      signInWithRedirect(auth, provider).catch(function(redirectErr){
+        console.error('[AI Mastery] Redirect also failed:', redirectErr.code, redirectErr.message);
         document.getElementById('auth-form').style.display='block';
         document.getElementById('auth-loading').style.display='none';
-        showAuthErr('Gagal: ' + (err.code||'') + ' - ' + (err.message||''));
-      });
-    } else {
-      console.log('[AI Mastery] Using popup login...');
-      signInWithPopup(auth, provider).then(function(result) {
-        console.log('[AI Mastery] Login OK:', result.user.displayName);
-        onAuthSuccess(result.user);
-      }).catch(function(err) {
-        console.error('[AI Mastery] Popup error:', err);
-        document.getElementById('auth-form').style.display='block';
-        document.getElementById('auth-loading').style.display='none';
-        if (err.code === 'auth/popup-blocked') {
-          showAuthErr('Popup diblokir! Izinkan popup lalu coba lagi.','#f59e0b');
-        } else if (err.code === 'auth/unauthorized-domain') {
-          showAuthErr('Domain belum terdaftar di Firebase Console.');
-        } else if (err.code === 'auth/popup-closed-by-user') {
+        if(redirectErr.code === 'auth/unauthorized-domain'){
+          showAuthErr('Domain belum terdaftar di Firebase. Tambahkan di: Firebase → Auth → Settings → Authorized domains','#ef4444');
+        } else if(redirectErr.code === 'auth/redirect-cancelled-by-user'){
           showAuthErr('Login dibatalkan.','#8b92a8');
         } else {
-          showAuthErr('Gagal: ' + (err.code||'') + ' - ' + (err.message||''));
+          showAuthErr('Gagal login: ' + (redirectErr.code||'') + '. Coba lagi atau gunakan browser lain.');
         }
       });
-    }
-  } catch(e) {
-    console.error('[AI Mastery] googleLogin EXCEPTION:', e);
-    document.getElementById('auth-form').style.display='block';
-    document.getElementById('auth-loading').style.display='none';
-    showAuthErr('Error: ' + e.message);
+    });
   }
 }
 
-// === LOGOUT FUNCTION ===
+// === LOGOUT ===
 function logout(){
   if(auth) signOut(auth);
   currentUser=null; uidKey='guest';
@@ -860,108 +901,135 @@ function logout(){
   document.getElementById('user-bar').style.display='none';
 }
 
-// === EXPOSE TO WINDOW (for inline onclick handlers) ===
+// === EXPOSE TO WINDOW ===
 window.logout = logout;
 window.googleLogin = googleLogin;
 
 // === BOOT ===
-var _authChecked = false;
 var _bootDone = false;
 
+function doLoginSuccess(user){
+  if(_bootDone) return;
+  _bootDone = true;
+  console.log('[AI Mastery] Login detected:', user.displayName);
+  currentUser = user; uidKey = user.uid;
+  if(window._dismissLoading) window._dismissLoading();
+  hideAuth(); loadUserData(); initApp(); updateUserBar(); saveUserData();
+}
+
 function setupAndButton(){
-  console.log('[AI Mastery] setupAndButton called, auth=' + !!auth);
+  console.log('[AI Mastery] setupAndButton, auth=' + !!auth + ', readyState=' + document.readyState + ', mobile=' + _mobileDetected);
   if(!auth){
     if(window._dismissLoading) window._dismissLoading();
     showAuthErr('Firebase gagal dimuat. Pastikan koneksi internet aktif lalu refresh halaman.','#ef4444');
     return;
   }
 
+  // Update status indicator
   var statusDot=document.getElementById('fb-status');
   var statusText=document.getElementById('fb-status-text');
   if(statusDot){statusDot.style.background='#10b981';statusDot.title='Firebase: Connected'}
   if(statusText){statusText.textContent='Siap login';statusText.style.color='#10b981'}
   window.firebaseReady = true;
 
-  // STEP 1: Set persistence FIRST, then check redirect result
+  // ============================================
+  // STEP 1 (CRITICAL): Set persistence FIRST
+  // Must be done before any other auth operations
+  // Falls back to session persistence if local storage blocked (iOS private, etc.)
+  // ============================================
   setPersistence(auth, browserLocalPersistence).then(function(){
     console.log('[AI Mastery] Persistence set to LOCAL');
-    _persistenceReady = true;
+    _startAuthListeners();
+  }).catch(function(e){
+    console.warn('[AI Mastery] Local persistence failed, trying SESSION:', e);
+    setPersistence(auth, browserSessionPersistence).then(function(){
+      console.log('[AI Mastery] Persistence set to SESSION (local was blocked)');
+      _startAuthListeners();
+    }).catch(function(e2){
+      console.error('[AI Mastery] Session persistence also failed:', e2);
+      _startAuthListeners(); // continue anyway
+    });
+  });
+}
 
-    // STEP 2: Now check redirect result (after persistence is guaranteed)
-    return getRedirectResult(auth);
-  }).then(function(result){
-    console.log('[AI Mastery] getRedirectResult done, user=' + !!(result && result.user));
-    if(result && result.user){
-      console.log('[AI Mastery] Redirect login success:', result.user.displayName);
-      _authChecked = true;
-      onAuthSuccess(result.user);
-      return;
-    }
-    // No redirect result — check persistent login
-    _authChecked = true;
-    finalizeBoot();
-  }).catch(function(err){
-    console.log('[AI Mastery] Redirect result error:', err.code || err.message || 'none');
-    _authChecked = true;
+function _startAuthListeners(){
+  console.log('[AI Mastery] Starting auth listeners...');
 
-    // Show specific error for common mobile issues
-    if(err.code === 'auth/unauthorized-domain'){
-      showAuthErr('Domain belum terdaftar di Firebase Console.');
+  // ============================================
+  // PRIMARY: onAuthStateChanged — catches ALL login methods
+  // (popup, redirect, persistent session)
+  // ============================================
+  onAuthStateChanged(auth, function(user){
+    console.log('[AI Mastery] onAuthStateChanged: user=' + !!user + ' name=' + (user ? user.displayName : 'null') + ' bootDone=' + _bootDone);
+    if(user){
+      doLoginSuccess(user);
     }
-    finalizeBoot();
   });
 
-  // STEP 3: Add onAuthStateChanged as safety net for mobile redirect
-  onAuthStateChanged(auth, function(user){
-    console.log('[AI Mastery] onAuthStateChanged fired, user=' + !!user + ' checked=' + _authChecked + ' done=' + _bootDone);
-    if(_bootDone) return; // Already booted, ignore
-    if(user){
-      console.log('[AI Mastery] Auth state changed - user found:', user.displayName);
-      currentUser = user; uidKey = user.uid;
+  // ============================================
+  // SECONDARY: getRedirectResult — handles redirect return
+  // ============================================
+  getRedirectResult(auth).then(function(result){
+    console.log('[AI Mastery] getRedirectResult: user=' + !!(result && result.user) + ' credential=' + !!(result && result.credential));
+    if(result && result.user){
+      doLoginSuccess(result.user);
+    }
+  }).catch(function(err){
+    console.log('[AI Mastery] getRedirectResult error:', err.code || err.message || 'none');
+    if(err.code === 'auth/unauthorized-domain'){
+      if(!_bootDone){
+        _bootDone = true;
+        if(window._dismissLoading) window._dismissLoading();
+        showAuthErr('ERROR: Domain belum terdaftar di Firebase! Buka Firebase Console → Auth → Settings → Authorized domains, lalu tambahkan: ' + window.location.hostname, '#ef4444');
+      }
+    }
+  });
+
+  // ============================================
+  // FALLBACK: Timeout — show auth screen after 4s if no login detected
+  // Increased to 4s to give mobile more time for auth processing
+  // ============================================
+  setTimeout(function(){
+    if(_bootDone) return;
+    _bootDone = true;
+    console.log('[AI Mastery] Boot timeout (' + (_mobileDetected ? 'mobile' : 'desktop') + ') - no user detected');
+
+    // One last check for persistent session
+    if(auth.currentUser){
+      console.log('[AI Mastery] Last check found user:', auth.currentUser.displayName);
+      currentUser = auth.currentUser; uidKey = auth.currentUser.uid;
       if(window._dismissLoading) window._dismissLoading();
       hideAuth(); loadUserData(); initApp(); updateUserBar(); saveUserData();
-      _bootDone = true;
+      return;
     }
-  });
 
-  // STEP 4: Attach button listener
+    // No user → show auth screen
+    if(window._dismissLoading) window._dismissLoading();
+  }, _mobileDetected ? 5000 : 3000);
+
+  // ============================================
+  // Attach button listener
+  // ============================================
   var btn=document.getElementById('btn-glogin');
   if(btn){
     btn.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();googleLogin()});
-    console.log('[AI Mastery] Button listener attached OK');
+    console.log('[AI Mastery] Button listener attached');
   }else{console.error('[AI Mastery] Button #btn-glogin NOT FOUND')}
 }
 
-function finalizeBoot(){
-  if(_bootDone) return;
-  console.log('[AI Mastery] finalizeBoot, authChecked=' + _authChecked);
-  _bootDone = true;
-  // Check current auth state (handles persistent login from localStorage)
-  var user = auth.currentUser;
-  if(user){
-    console.log('[AI Mastery] Persistent login found:', user.displayName);
-    currentUser=user; uidKey=user.uid;
-    if(window._dismissLoading) window._dismissLoading();
-    hideAuth(); loadUserData(); initApp(); updateUserBar(); saveUserData();
-  }else{
-    console.log('[AI Mastery] No persistent login - showing auth screen');
-    if(window._dismissLoading) window._dismissLoading();
-  }
-}
-
 function bootApp(){
-  console.log('[AI Mastery] bootApp - SDK loaded:', window._fbLoaded, 'readyState:', document.readyState);
+  console.log('[AI Mastery] bootApp');
   setupAndButton();
 }
 if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',bootApp)}else{bootApp()}
 
-// Safety: dismiss loading after 10s max
+// Safety: dismiss loading after 12s max
 setTimeout(function(){
   if(document.getElementById('ld') && !document.getElementById('ld').classList.contains('off')){
-    console.warn('[AI Mastery] Loading timeout - dismissing anyway');
+    console.warn('[AI Mastery] Loading timeout');
     if(window._dismissLoading) window._dismissLoading();
   }
-}, 10000);
+}, 12000);
 </script>
 
 <script>

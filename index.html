@@ -906,15 +906,22 @@ window.logout = logout;
 window.googleLogin = googleLogin;
 
 // === BOOT ===
-var _bootDone = false;
+var _appInitialized = false;
 
 function doLoginSuccess(user){
-  if(_bootDone) return;
-  _bootDone = true;
-  console.log('[AI Mastery] Login detected:', user.displayName);
+  // IMPORTANT: Do NOT block login with _appInitialized flag!
+  // onAuthStateChanged and getRedirectResult can fire AFTER the timeout.
+  // If user is valid, always process the login.
+  console.log('[AI Mastery] doLoginSuccess called: ' + user.displayName + ' (appInit=' + _appInitialized + ')');
   currentUser = user; uidKey = user.uid;
   if(window._dismissLoading) window._dismissLoading();
-  hideAuth(); loadUserData(); initApp(); updateUserBar(); saveUserData();
+  hideAuth(); loadUserData();
+  // Only call initApp() ONCE to prevent duplicate initialization
+  if(!_appInitialized){
+    _appInitialized = true;
+    initApp();
+  }
+  updateUserBar(); saveUserData();
 }
 
 function setupAndButton(){
@@ -960,7 +967,7 @@ function _startAuthListeners(){
   // (popup, redirect, persistent session)
   // ============================================
   onAuthStateChanged(auth, function(user){
-    console.log('[AI Mastery] onAuthStateChanged: user=' + !!user + ' name=' + (user ? user.displayName : 'null') + ' bootDone=' + _bootDone);
+    console.log('[AI Mastery] onAuthStateChanged: user=' + !!user + ' name=' + (user ? user.displayName : 'null') + ' appInit=' + _appInitialized);
     if(user){
       doLoginSuccess(user);
     }
@@ -977,8 +984,8 @@ function _startAuthListeners(){
   }).catch(function(err){
     console.log('[AI Mastery] getRedirectResult error:', err.code || err.message || 'none');
     if(err.code === 'auth/unauthorized-domain'){
-      if(!_bootDone){
-        _bootDone = true;
+      if(!_appInitialized){
+        _appInitialized = true;
         if(window._dismissLoading) window._dismissLoading();
         showAuthErr('ERROR: Domain belum terdaftar di Firebase! Buka Firebase Console → Auth → Settings → Authorized domains, lalu tambahkan: ' + window.location.hostname, '#ef4444');
       }
@@ -986,26 +993,27 @@ function _startAuthListeners(){
   });
 
   // ============================================
-  // FALLBACK: Timeout — show auth screen after 4s if no login detected
-  // Increased to 4s to give mobile more time for auth processing
+  // FALLBACK: Timeout — only dismisses loading spinner
+  // Does NOT block login! doLoginSuccess can still run after this.
+  // Mobile gets 8s because redirect auth processing takes longer on mobile.
   // ============================================
   setTimeout(function(){
-    if(_bootDone) return;
-    _bootDone = true;
-    console.log('[AI Mastery] Boot timeout (' + (_mobileDetected ? 'mobile' : 'desktop') + ') - no user detected');
+    console.log('[AI Mastery] Boot timeout (' + (_mobileDetected ? 'mobile' : 'desktop') + ') appInit=' + _appInitialized + ' currentUser=' + !!currentUser);
+
+    // If already logged in by auth listeners, nothing to do
+    if(currentUser) return;
 
     // One last check for persistent session
-    if(auth.currentUser){
+    if(auth && auth.currentUser){
       console.log('[AI Mastery] Last check found user:', auth.currentUser.displayName);
-      currentUser = auth.currentUser; uidKey = auth.currentUser.uid;
-      if(window._dismissLoading) window._dismissLoading();
-      hideAuth(); loadUserData(); initApp(); updateUserBar(); saveUserData();
+      doLoginSuccess(auth.currentUser);
       return;
     }
 
-    // No user → show auth screen
+    // No user → just dismiss loading screen (auth overlay already visible)
     if(window._dismissLoading) window._dismissLoading();
-  }, _mobileDetected ? 5000 : 3000);
+    console.log('[AI Mastery] No user found after timeout, auth screen visible');
+  }, _mobileDetected ? 8000 : 3000);
 
   // ============================================
   // Attach button listener
@@ -1284,3 +1292,4 @@ function sQR(){
 </script>
 </body>
 </html>
+.

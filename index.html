@@ -727,6 +727,48 @@ function hideAuth(){
   var el=document.getElementById('auth-overlay');
   if(el){el.classList.add('off');setTimeout(function(){el.style.display='none'},500)}
 }
+
+// === TOGGLE USER DROPDOWN ===
+function toggleDD(){
+  var dd=document.getElementById('user-dd');
+  if(dd) dd.classList.toggle('show');
+}
+// Close dropdown when clicking outside
+document.addEventListener('click',function(e){
+  var dd=document.getElementById('user-dd');
+  var ub=document.getElementById('user-bar');
+  if(dd && ub && !ub.contains(e.target) && !dd.contains(e.target)){
+    dd.classList.remove('show');
+  }
+});
+
+// === UPDATE USER BAR (avatar + name in topbar) ===
+function updateUserBar(){
+  if(!currentUser) return;
+  var photo=currentUser.photoURL||'';
+  var name=currentUser.displayName||currentUser.email||'User';
+  var email=currentUser.email||'';
+
+  // Topbar user-bar
+  var ub=document.getElementById('user-bar');
+  if(ub) ub.style.display='flex';
+  var av=document.getElementById('user-avatar');
+  if(av) av.src=photo;
+  var nm=document.getElementById('user-name');
+  if(nm) nm.textContent=name.split(' ')[0];
+
+  // Dropdown
+  var ddav=document.getElementById('dd-avatar');
+  if(ddav) ddav.src=photo;
+  var ddn=document.getElementById('dd-name');
+  if(ddn) ddn.textContent=name;
+  var dde=document.getElementById('dd-email');
+  if(dde) dde.textContent=email;
+
+  console.log('[AI Mastery] User bar updated:', name);
+}
+window.toggleDD = toggleDD;
+window.updateUserBar = updateUserBar;
 </script>
 
 <script type="module">
